@@ -1,0 +1,34 @@
+{
+  "default": "en",
+  "supported": ["en", "af", "zu", "xh"],
+  "languages": {
+    "en": {
+      "code": "en",
+      "name": "English",
+      "nativeName": "English",
+      "rtl": false,
+      "urlPrefix": null
+    },
+    "af": {
+      "code": "af",
+      "name": "Afrikaans",
+      "nativeName": "Afrikaans",
+      "rtl": false,
+      "urlPrefix": "af"
+    },
+    "zu": {
+      "code": "zu",
+      "name": "Zulu",
+      "nativeName": "isiZulu",
+      "rtl": false,
+      "urlPrefix": "zu"
+    },
+    "xh": {
+      "code": "xh",
+      "name": "Xhosa",
+      "nativeName": "isiXhosa",
+      "rtl": false,
+      "urlPrefix": "xh"
+    }
+  }
+}

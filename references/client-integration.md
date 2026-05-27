@@ -248,7 +248,20 @@ import { LocalizedLink } from '@/i18n/LocalizedLink';
 // → on /af/anything, renders <a href="/af/products">
 ```
 
-Implementation lives in `assets/TranslationProvider.tsx` (exported alongside the provider). It wraps `<Link>` and forwards all props, only overriding `params.locale`. Type safety is slightly loosened compared to raw `<Link>` (the `to` prop is `string` rather than the inferred route-tree union); users who want strict type-safety can call TanStack's `<Link>` directly with explicit params.
+Implementation lives in `assets/LocalizedLink.tsx`. It wraps TanStack's `<Link>` and forwards all props, only overriding `params.locale`. Type safety is slightly loosened compared to raw `<Link>` — the `to` prop is `string` rather than the inferred route-tree union — because the wrapper can't infer types across an arbitrary route tree without per-project codegen.
+
+For type-critical pathways (links inside design-system components, generated nav menus) use the `useLocaleParams()` hook with TanStack's typed `<Link>` directly:
+
+```tsx
+import { Link } from '@tanstack/react-router';
+import { useLocaleParams } from '@/i18n/LocalizedLink';
+
+const localeParams = useLocaleParams();
+<Link to="/products" params={localeParams}>Products</Link>
+// Full TanStack type-checking on `to`; locale injected from context.
+```
+
+The same file exports both. Use `<LocalizedLink>` for app-level nav (ergonomic), `useLocaleParams()` + `<Link>` for type-safe paths.
 
 ### Programmatic navigation
 
@@ -267,7 +280,7 @@ navigate({
 });
 ```
 
-A `useLocalizedNavigate()` helper in `assets/TranslationProvider.tsx` wraps this so call sites stay short:
+A `useLocalizedNavigate()` helper in `assets/LocalizedLink.tsx` wraps this so call sites stay short:
 
 ```tsx
 const localizedNavigate = useLocalizedNavigate();

@@ -70,5 +70,6 @@ Assets (drop-in code the user copies into their Lovable project):
 - `assets/edge-function-translate.ts` — Deno Edge Function: service account JWT signing, token cache, Google call, upsert.
 - `assets/TranslationProvider.tsx` — React context provider and locale state.
 - `assets/useTranslate.tsx` — the `useTranslate(text)` hook and the `<T>` component (one file, two exports).
+- `assets/LocalizedLink.tsx` — `<LocalizedLink>`, `useLocaleParams()`, and `useLocalizedNavigate()` for locale-preserving navigation with TanStack Router.
 - `assets/LanguageSwitcher.tsx` — drop-in switcher UI with native-name labels.
 - `assets/za-languages.json` — `{ en, af, zu, xh }` with display name, native name, RTL flag.
