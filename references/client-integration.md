@@ -1,44 +1,47 @@
 # Client Integration
 
-How the React side fits together: the provider, the hook, the `<T>` component, the router config, the language switcher, and the gotchas that lose people half a day. Full implementations live in `assets/`.
+How the React side fits together: the provider, the hook, the `<T>` component, the TanStack Router config, the language switcher, and the gotchas that lose people half a day. Full implementations live in `assets/`.
 
 ## Prerequisites in the Lovable project
 
-This reference assumes a typical Lovable stack:
+This reference assumes the current Lovable default stack:
 
 - **Vite + React 18+**
-- **React Router 6+** (`react-router-dom`)
+- **TanStack Router** (`@tanstack/react-router`) — file-based routing by default
 - **`@supabase/supabase-js`** client already exported from somewhere central (often `src/lib/supabase.ts`)
-- **TypeScript** (not strictly required but the assets are `.tsx` / `.ts`)
+- **TypeScript** (assets are `.tsx` / `.ts`)
 
-If the project uses TanStack Router, Next.js App Router, or another router, the router-config section below changes shape — the provider, hook, and `<T>` are router-agnostic.
+The provider, hook, and `<T>` are router-agnostic and would work with any React router. Only the router-config section, `LocalizedLink`, and `LanguageSwitcher` are TanStack-specific. If you're on a legacy React Router project, the same patterns translate with import swaps and a route-duplication approach.
 
 ## What you mount, in order
 
-1. `<TranslationProvider>` once, at the root, inside `<BrowserRouter>`.
-2. `<LanguageSwitcher />` somewhere visible in nav.
-3. `<T>...</T>` or `useTranslate(...)` everywhere you have user-visible text.
-4. Replace `<Link>` with `<LocalizedLink>` for any link that should preserve the current locale.
+1. `<TranslationProvider>` once, inside `__root.tsx`, wrapping `<Outlet />`.
+2. A `{-$locale}` layout route that contains your app's routes.
+3. `<LanguageSwitcher />` somewhere visible in nav.
+4. `<T>...</T>` or `useTranslate(...)` everywhere you have user-visible text.
+5. Replace `<Link>` with `<LocalizedLink>` for any link that should preserve the current locale.
 
-Asset files (`assets/TranslationProvider.tsx`, `assets/useTranslate.tsx`, `assets/LanguageSwitcher.tsx`, `assets/za-languages.json`) drop into `src/i18n/` in the Lovable project — no other layout works without renaming imports.
+Asset files (`assets/TranslationProvider.tsx`, `assets/useTranslate.tsx`, `assets/LanguageSwitcher.tsx`, `assets/za-languages.json`) drop into `src/i18n/` in the Lovable project. No other layout works without renaming imports.
 
 ## TranslationProvider
 
-Wraps the app, owns locale state, exposes context.
+Wraps the app, owns locale state, exposes context. In a TanStack file-based project, it goes in the root route component:
 
 ```tsx
-// src/main.tsx
-import { BrowserRouter } from 'react-router-dom';
-import { TranslationProvider } from './i18n/TranslationProvider';
+// src/routes/__root.tsx
+import { Outlet, createRootRoute } from '@tanstack/react-router';
+import { TranslationProvider } from '@/i18n/TranslationProvider';
 
-<BrowserRouter>
-  <TranslationProvider>
-    <App />
-  </TranslationProvider>
-</BrowserRouter>
+export const Route = createRootRoute({
+  component: () => (
+    <TranslationProvider>
+      <Outlet />
+    </TranslationProvider>
+  ),
+});
 ```
 
-It MUST sit inside `<BrowserRouter>` because it reads `useLocation()` to derive locale from the URL. If it sits outside, you'll get a runtime error from the hook.
+It MUST sit inside the TanStack router context (i.e. inside or below `RouterProvider`). The root route component is the canonical location. If you mount it outside `RouterProvider`, `useRouterState` throws at runtime.
 
 ### Props
 
@@ -50,7 +53,7 @@ It MUST sit inside `<BrowserRouter>` because it reads `useLocation()` to derive 
 
 ### What it owns
 
-- Reading the current locale from `useLocation().pathname` (first segment, validated against `supportedLocales`).
+- Reading the current locale from the URL via `useRouterState({ select: s => s.location.pathname })`. Splits on `/`, takes the first segment, validates against `supportedLocales`.
 - Exposing `{ locale, setLocale, supportedLocales }` via context.
 - An in-memory `Map<string, string>` cache shared across all `useTranslate` calls in the tree.
 - Writing the user's chosen locale to `localStorage['tx:preferred-locale']` whenever it changes.
@@ -60,7 +63,7 @@ It MUST sit inside `<BrowserRouter>` because it reads `useLocation()` to derive 
 
 - localStorage cache of *translations* — that lives in `useTranslate` so the hook can be used independently.
 - The actual Edge Function call — also in `useTranslate`.
-- Routing / `<Link>` rewriting — `<LocalizedLink>` is a separate small component.
+- Route definitions — see "Router configuration" below.
 
 ## useTranslate and `<T>`
 
@@ -135,86 +138,141 @@ export const fmt = (template: string, vars: Record<string, string | number>) =>
   );
 ```
 
-## Router configuration
+## Router configuration — TanStack Router
 
-The router itself is unchanged from a standard Lovable setup. Locale is parsed from `pathname`, not from a route segment, so you don't need a `:locale?` parameter.
+TanStack Router has a built-in optional-locale primitive: the `{-$locale}` segment. **One route file matches both `/products` and `/af/products`** — no manual duplication.
 
-```tsx
-// src/App.tsx
-<Routes>
-  <Route path="/products" element={<Products />} />
-  <Route path="/about" element={<About />} />
-  <Route path="/:rest*" element={<NotFound />} />
-</Routes>
+### File-based routing (default — what Lovable scaffolds)
+
+The route tree lives in `src/routes/`. To add a `{-$locale}` prefix to your existing routes, group them under a layout route file:
+
+```
+src/routes/
+├── __root.tsx                          // wraps everything in TranslationProvider
+├── {-$locale}.tsx                      // optional-locale layout route
+├── {-$locale}/index.tsx                // matches /  AND  /af  AND  /zu  AND  /xh
+├── {-$locale}/products.tsx             // matches /products  AND  /af/products  …
+├── {-$locale}/products.$id.tsx         // /products/123 AND /af/products/123 …
+└── {-$locale}/about.tsx                // /about AND /af/about …
 ```
 
-When a visitor lands on `/af/products`, the `Routes` block above does **not** match — that's intentional, because we want the provider to handle the prefix, not the router. To make it work, peel the locale prefix off the pathname inside the provider before React Router sees it. Two implementations both work; the assets use option B.
+Behaviour:
 
-### Option A: redirect to the un-prefixed path internally
-
-The provider, on detecting `/af/...`, stores `locale = 'af'` and uses `useNavigate({ replace: true })` to rewrite to `/...`. The URL displayed to the user is then `/products`, but locale is `af`. This breaks the URL contract (shareable links lose the locale).
-
-**Don't use this.** Listed only so you know to avoid it if you see it suggested elsewhere.
-
-### Option B: split routes into a localised group (default)
+- A visit to `/products` matches the route with `params.locale === undefined`.
+- A visit to `/af/products` matches with `params.locale === 'af'`.
+- A visit to `/foo/products` (`foo` is not a known locale) — by default, TanStack tries to match `foo` as the locale value. The provider validates and falls through to `en`, **but** the URL still shows `/foo/products`. To redirect cleanly, validate in the layout's `beforeLoad`:
 
 ```tsx
-// src/App.tsx
-<Routes>
-  {/* English routes (no prefix) */}
-  <Route path="/" element={<Home />} />
-  <Route path="/products" element={<Products />} />
-  <Route path="/products/:id" element={<ProductDetail />} />
-  <Route path="/about" element={<About />} />
+// src/routes/{-$locale}.tsx
+import { createFileRoute, Outlet, redirect } from '@tanstack/react-router';
 
-  {/* Localised routes — same components, prefixed path */}
-  <Route path="/:locale" element={<Home />} />
-  <Route path="/:locale/products" element={<Products />} />
-  <Route path="/:locale/products/:id" element={<ProductDetail />} />
-  <Route path="/:locale/about" element={<About />} />
+const SUPPORTED_PREFIXES = ['af', 'zu', 'xh'] as const;
 
-  <Route path="*" element={<NotFound />} />
-</Routes>
+export const Route = createFileRoute('/{-$locale}')({
+  beforeLoad: ({ params }) => {
+    if (params.locale && !(SUPPORTED_PREFIXES as readonly string[]).includes(params.locale)) {
+      // Bogus prefix — strip it
+      throw redirect({ to: '/', replace: true });
+    }
+  },
+  component: Outlet,
+});
 ```
 
-Verbose but explicit. The provider validates that `:locale` is in `supportedLocales`; anything else falls through to `<NotFound />`.
+The layout itself just renders `<Outlet />`. The locale is read from URL by `TranslationProvider`; the layout doesn't need to pass it down.
 
-For larger apps, generate the localised duplicates from a route table:
+### Code-based routing (alternative — older TanStack projects)
 
-```ts
-const routes = [
-  { path: '/', element: <Home /> },
-  { path: '/products', element: <Products /> },
-  // ...
-];
-// Render both: plain + each prefixed with /:locale
-```
-
-`assets/TranslationProvider.tsx` ships with a `useLocalizedRoutes(routes)` helper that does exactly this.
-
-### LocalizedLink
-
-Drop-in replacement for React Router's `<Link>`:
+If your project defines routes in code with `createRouter`/`createRoute`, the same `{-$locale}` segment works:
 
 ```tsx
-// ❌ jumps to English version
-<Link to="/products">Products</Link>
+import { createRootRoute, createRoute, createRouter, Outlet, redirect } from '@tanstack/react-router';
 
-// ✅ stays in the current locale
+const rootRoute = createRootRoute({
+  component: () => (
+    <TranslationProvider>
+      <Outlet />
+    </TranslationProvider>
+  ),
+});
+
+const localeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/{-$locale}',
+  beforeLoad: ({ params }) => {
+    if (params.locale && !['af','zu','xh'].includes(params.locale)) {
+      throw redirect({ to: '/', replace: true });
+    }
+  },
+});
+
+const productsRoute = createRoute({
+  getParentRoute: () => localeRoute,
+  path: 'products',
+  component: ProductsPage,
+});
+
+const router = createRouter({
+  routeTree: rootRoute.addChildren([
+    localeRoute.addChildren([productsRoute /* …other routes */]),
+  ]),
+});
+```
+
+Same matching behaviour as file-based. The file-based form is much shorter and is what new Lovable projects use.
+
+### Migrating from React Router
+
+If you're porting an existing React Router app: every `<Route path="/foo">` becomes a `src/routes/{-$locale}/foo.tsx` (or a code-based child of `localeRoute`). React Router's "duplicate every route under `/:locale`" pattern is **not** needed in TanStack — the optional param does it for you.
+
+## LocalizedLink
+
+TanStack's `<Link>` requires you to pass the locale explicitly as a path param:
+
+```tsx
+import { Link } from '@tanstack/react-router';
+
+// Tedious — every link needs the locale param manually
+<Link to="/products" params={{ locale: currentLocale === 'en' ? undefined : currentLocale }}>
+  Products
+</Link>
+```
+
+`LocalizedLink` reads the current locale from `TranslationProvider` and injects it for you:
+
+```tsx
+import { LocalizedLink } from '@/i18n/LocalizedLink';
+
 <LocalizedLink to="/products">Products</LocalizedLink>
+// → on /, renders <a href="/products">
+// → on /af/anything, renders <a href="/af/products">
 ```
 
-`LocalizedLink` reads the current locale from context and prepends `/${locale}/` if locale is not `en`. For `to="/products"` with locale `af` it renders `<a href="/af/products">`. It also accepts the same `replace`, `state`, `relative` props as `<Link>`.
+Implementation lives in `assets/TranslationProvider.tsx` (exported alongside the provider). It wraps `<Link>` and forwards all props, only overriding `params.locale`. Type safety is slightly loosened compared to raw `<Link>` (the `to` prop is `string` rather than the inferred route-tree union); users who want strict type-safety can call TanStack's `<Link>` directly with explicit params.
 
-Programmatic navigation uses the same `localePath` helper:
+### Programmatic navigation
+
+Use TanStack's `useNavigate` and pass the locale:
 
 ```tsx
+import { useNavigate } from '@tanstack/react-router';
+import { useTranslationContext } from '@/i18n/TranslationProvider';
+
 const navigate = useNavigate();
 const { locale } = useTranslationContext();
 
-navigate(localePath('/products', locale));
-// locale 'en' → '/products'
-// locale 'af' → '/af/products'
+navigate({
+  to: '/products',
+  params: { locale: locale === 'en' ? undefined : locale },
+});
+```
+
+A `useLocalizedNavigate()` helper in `assets/TranslationProvider.tsx` wraps this so call sites stay short:
+
+```tsx
+const localizedNavigate = useLocalizedNavigate();
+localizedNavigate({ to: '/products' });
+// locale param injected automatically
 ```
 
 ## LanguageSwitcher
@@ -222,7 +280,7 @@ navigate(localePath('/products', locale));
 Drop-in component, no required props:
 
 ```tsx
-import { LanguageSwitcher } from './i18n/LanguageSwitcher';
+import { LanguageSwitcher } from '@/i18n/LanguageSwitcher';
 
 <nav>
   {/* ... */}
@@ -232,13 +290,13 @@ import { LanguageSwitcher } from './i18n/LanguageSwitcher';
 
 Renders a button/dropdown listing the four locales by their **native** name (English, Afrikaans, isiZulu, isiXhosa). On click it:
 
-1. Computes the new path: strip the current locale prefix if any, then prepend the new one (unless the new locale is `en`).
+1. Calls TanStack's `useNavigate` with the current `to` path and the new locale param. Same path, different locale.
 2. Writes the choice to `localStorage['tx:preferred-locale']`.
-3. Calls `navigate(newPath, { replace: false })` so back-button still works.
+3. Uses `replace: false` so the back button returns to the previous locale.
 
 The current locale is shown as selected/disabled. Styling is left to the consumer (`assets/LanguageSwitcher.tsx` uses minimal class names; restyle freely).
 
-To use a different UI (toggle, flag icons, etc.) — call `setLocale(code)` from context yourself. Don't re-implement the path rewriting; import `localePath` from the provider.
+To use a different UI (toggle, flag icons, etc.) — call `setLocale(code)` from context yourself. The context handles both the navigation and the localStorage write.
 
 ## Persistence — the role of localStorage
 
@@ -259,7 +317,7 @@ If you want auto-redirect-on-return, that's a one-line change in the provider �
 <TranslationProvider detectBrowserLocale={true}>
 ```
 
-Behaviour: on the very first visit (no `tx:preferred-locale` set), if `navigator.language.split('-')[0]` is in `supportedLocales`, redirect to the matching prefix.
+Behaviour: on the very first visit (no `tx:preferred-locale` set), if `navigator.language.split('-')[0]` is in `supportedLocales`, navigate to the matching prefix.
 
 Turn on when:
 
@@ -329,9 +387,25 @@ Or for toast libraries that take JSX:
 toast.success(<T>Saved successfully</T>);
 ```
 
-### Server-rendered HTML (SSR / prerender)
+### Route loaders
 
-If you're prerendering for SEO, the hook needs to run at build time with locale set explicitly. See `references/architecture.md` § SEO and SSR — the hook is build-time-aware when given a locale prop instead of reading from URL.
+TanStack `loader` and `beforeLoad` run *before* the React tree mounts, so the `useTranslate` hook isn't available there. If a loader needs translated strings (e.g. for the document title), translate inline:
+
+```tsx
+export const Route = createFileRoute('/{-$locale}/products')({
+  loader: async ({ params }) => {
+    // Don't useTranslate here — call the Edge Function directly if you really need it
+    return { /* data */ };
+  },
+  head: () => ({ meta: [{ title: 'Products' }] }), // English; consider per-locale heads
+});
+```
+
+Per-locale `<head>` content (titles, meta descriptions) is best handled with a small `useDocumentTitle(t('Products'))` hook called from the component body, not from `loader`. The skill does not ship a meta-translation helper — too coupled to specific SEO patterns.
+
+### Server-rendered HTML (SSR / prerender / TanStack Start)
+
+If you're prerendering for SEO, or using TanStack Start with SSR enabled, the hook needs to run on the server too. The Supabase client must be available at SSR time and authenticated (anon key is fine — translation rows are public-read). See `references/architecture.md` § SEO and SSR — the hook is build-time-aware when given a locale prop instead of reading from URL.
 
 ## What to check after wiring this up
 
@@ -339,6 +413,7 @@ If you're prerendering for SEO, the hook needs to run at build time with locale 
 - [ ] `/af/` (or `/zu/`, `/xh/`) renders translated, with one call per unique `<T>` string on first visit.
 - [ ] Reloading `/af/` makes zero Edge Function calls — all served from localStorage.
 - [ ] Switching languages via `<LanguageSwitcher>` round-trips through all four locales, URL updates correctly, no stuck prefixes.
+- [ ] `/foo/products` (bogus prefix) redirects to `/products` (or wherever your `beforeLoad` sends it) without rendering anything broken.
 - [ ] An English page with an `<a href="/products">` (raw HTML, not `<LocalizedLink>`) jumps to the English version — confirms `<LocalizedLink>` is being used where intended.
 - [ ] `localStorage` shows `tx:preferred-locale` and a growing list of `tx:{hash}:{locale}` keys.
 - [ ] Editing a `<T>` string and reloading retranslates it (new hash → cache miss → fresh API call).
@@ -346,12 +421,18 @@ If you're prerendering for SEO, the hook needs to run at build time with locale 
 
 ## Common errors
 
-- **"`useLocation` called outside `<BrowserRouter>`".** `TranslationProvider` is mounted above `<BrowserRouter>`. Move it inside.
-- **"Cannot read property `pathname` of undefined".** Same root cause — the provider is rendering outside the router context.
-- **Switching locales via the switcher updates `localStorage` but not the URL.** `LanguageSwitcher` is calling `setLocale(code)` only, not navigating. Either use the bundled switcher or also call `navigate(localePath(currentPath, code))`.
-- **`<LocalizedLink>` to `/products` with locale `af` ends up at `/af/af/products`.** The `to` prop already contains a locale prefix — pass the unprefixed path. `to` is logical; `LocalizedLink` does the prefixing.
-- **Translation flashes English on every navigation.** The in-memory cache is being thrown away between routes because the provider is unmounting. Check React Router config — `<TranslationProvider>` must be above `<Routes>`, not inside a route element.
+- **"`useRouterState` called outside `RouterProvider`".** `TranslationProvider` is mounted outside the TanStack router context. Move it into `__root.tsx`'s component.
+- **`Cannot read properties of undefined (reading 'pathname')`.** Same root cause — the provider is rendering before the router mounts.
+- **`/foo/products` matches the route but `params.locale === 'foo'`.** The layout's `beforeLoad` is missing or doesn't redirect. Add the validation pattern in § File-based routing.
+- **Switching locales via the switcher updates `localStorage` but not the URL.** `LanguageSwitcher` is calling `setLocale(code)` only, not navigating. Either use the bundled switcher or also call `navigate({ to: currentPath, params: { locale: newCode } })`.
+- **`<LocalizedLink>` to `/products` with locale `af` ends up at `/af/af/products`.** The `to` prop already contains a locale prefix — pass the unprefixed path. `to` is logical; `LocalizedLink` does the prefixing via `params.locale`.
+- **Translation flashes English on every navigation.** The in-memory cache is being thrown away between routes because the provider is unmounting. Confirm `TranslationProvider` is in `__root.tsx` (lives once for the app), not in `{-$locale}.tsx` (re-mounts on every locale change).
 - **Translations work in dev but not after `vite build && vite preview`.** The Supabase URL or anon key is missing from the build's env. Check `.env.production` and Lovable's deploy env.
 - **First paint shows blank text, not English fallback.** `<T>` is rendering with `fallback={''}` or the `suspend` option is on without a Suspense boundary. Use the default — pass no `fallback`, no `suspend`.
-- **All localised pages show 404.** The localised routes weren't duplicated in `<Routes>`. See § Option B above — every English route needs a `/:locale/...` twin.
+- **TypeScript errors on `<LocalizedLink to="/products">`.** TanStack's `<Link>` infers `to` from the route tree; the wrapper widens it to `string`. Either accept the looser typing or call `<Link>` directly with explicit `params={{ locale }}`.
 - **Translation function called for `target_lang = 'en'`.** The hook isn't short-circuiting when locale is `en`. Confirm the first line of `useTranslate` returns `text` immediately when `locale === 'en'`.
+
+Sources:
+- [TanStack Router Path Params](https://tanstack.com/router/latest/docs/guide/path-params)
+- [TanStack Router Internationalization (i18n)](https://tanstack.com/router/latest/docs/guide/internationalization-i18n)
+- [TanStack Router Navigation](https://tanstack.com/router/latest/docs/guide/navigation)

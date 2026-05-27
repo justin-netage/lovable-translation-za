@@ -31,7 +31,7 @@ When something's broken, run these four checks in order. The first failure tells
 
 | Possible cause | How to confirm | Fix |
 |---|---|---|
-| Provider not mounted | `console.log` inside `useTranslate` for `locale` value | Wrap `<App>` in `<TranslationProvider>` *inside* `<BrowserRouter>` |
+| Provider not mounted | `console.log` inside `useTranslate` for `locale` value | Mount `<TranslationProvider>` in `src/routes/__root.tsx` wrapping `<Outlet />` |
 | URL prefix not parsed | The provider's pathname-split result is `''` instead of `'af'` | Confirm `pathname.split('/')[1]` and that you're checking against `'af'`, not `'/af'` |
 | `useTranslate` short-circuits before the locale switch | First line returns `text` regardless of locale | The short-circuit must check `locale === 'en'`, not `!locale` |
 | Locale validation rejects `'af'` | The `supportedLocales` array is mis-typed | Confirm exact strings: `['en','af','zu','xh']`, no spaces |

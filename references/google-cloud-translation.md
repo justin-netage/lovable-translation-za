@@ -109,7 +109,7 @@ Two checks before extending the locale set:
    GET https://translation.googleapis.com/v3/projects/{PROJECT_ID}/locations/global/supportedLanguages?display_language_code=en
    ```
    Look for the `languageCode` in the response. Common South African additions that work: `st` (Sesotho), `tn` (Setswana), `sn` (Shona — useful for cross-border).
-2. **Will the closed locale set in the router accept it?** Update `assets/za-languages.json` *and* the `:locale?` constraint in the router (see `references/client-integration.md`). Both must agree or the new locale will fall through to English.
+2. **Will the closed locale set accept it?** Update three places — they must agree: `assets/za-languages.json` (display data), the `SUPPORTED_PREFIXES` array in the `{-$locale}` layout route's `beforeLoad` (URL validation), and the `target_lang_valid` CHECK constraint on the `translations` table (DB-level guard). Miss any one and the new locale falls through to English or fails on insert.
 
 ## Request and response shape
 

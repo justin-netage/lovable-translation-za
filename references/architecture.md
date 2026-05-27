@@ -49,7 +49,7 @@ The system is a four-layer cache in front of Google Cloud Translation API v3. So
 
 A visitor lands on `/af/products`. Each step below assumes a cold cache; later steps short-circuit when warmer layers hit.
 
-1. **Route resolution.** React Router matches `/:locale?/*` and `TranslationProvider` reads `af` from the URL. The provider exposes `locale = "af"` via context.
+1. **Route resolution.** TanStack Router matches the `{-$locale}` layout route with `params.locale === "af"`; the layout's `beforeLoad` validates the prefix and `TranslationProvider` reads `af` from the URL. The provider exposes `locale = "af"` via context.
 2. **Render.** A component renders `<T>Add to cart</T>`. The component calls `useTranslate("Add to cart")`.
 3. **In-memory check.** The hook looks up `Map<key, string>` where `key = sha256("Add to cart") + ":af"`. Miss on first call.
 4. **localStorage check.** Same key under namespace `tx:`. Miss.
@@ -65,7 +65,7 @@ All later visitors for that string hit step 6 only. All later renders in the sam
 
 Locale is resolved on every render in this order. First match wins:
 
-1. **URL prefix.** `/af/...`, `/zu/...`, `/xh/...` set the locale explicitly. The router constrains `:locale?` to the closed set `af | zu | xh` so unknown values never reach the provider.
+1. **URL prefix.** `/af/...`, `/zu/...`, `/xh/...` set the locale explicitly. The `{-$locale}` layout route's `beforeLoad` validates the prefix against the closed set `af | zu | xh` and redirects to `/` for anything else, so unknown values never reach the provider.
 2. **Default: `en`.** No prefix → English.
 
 There is intentionally no `navigator.language` lookup, no localStorage lookup, and no Accept-Language header inspection. URL is the single source of truth — that's what makes URLs shareable across users and crawlable by bots.
@@ -140,7 +140,7 @@ Before declaring the integration done:
 ## Common errors
 
 - **Translation flickers on every render, not just first.** The in-memory map isn't being read because the `TranslationProvider` is re-mounting (likely due to a key change on a parent). Move the provider above the route changes.
-- **`/af/products` shows English forever.** Either the Edge Function is failing silently (check its logs) or the locale prefix isn't reaching the provider (check the router config — `:locale?` must be the first segment).
+- **`/af/products` shows English forever.** Either the Edge Function is failing silently (check its logs) or the locale prefix isn't reaching the provider (check `src/routes/{-$locale}.tsx` exists as the layout route and that your route files live under `src/routes/{-$locale}/...`).
 - **Same string translates multiple times.** The hash is being computed differently on the client and the server (different normalisation). Re-check that both sides trim + collapse whitespace identically.
 - **Costs ramping faster than expected.** Something is calling `useTranslate` with values that change every render (e.g. `useTranslate(`Total: ${price}`)` produces a new hash per price). For interpolated content, translate the template and interpolate after: `useTranslate("Total: {price}")` then `.replace("{price}", price)`.
 - **`navigator.language` translation kicked in for a user who never asked.** `detectBrowserLocale` is set to `true` somewhere. Default it back to `false`.
